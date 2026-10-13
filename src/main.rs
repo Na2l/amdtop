@@ -68,7 +68,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn dispatch<B: Backend>(backend: B, args: args::Args, theme: Theme) -> Result<(), Box<dyn std::error::Error>> {
     if args.debug {
-        return debug(backend);
+        return debug(backend, &theme);
     }
     if args.json {
         return json_mode(backend, args, theme);
@@ -80,18 +80,18 @@ fn dispatch<B: Backend>(backend: B, args: args::Args, theme: Theme) -> Result<()
 }
 
 /// `--debug`: print what was discovered.
-fn debug<B: Backend>(mut backend: B) -> Result<(), Box<dyn std::error::Error>> {
+fn debug<B: Backend>(mut backend: B, theme: &Theme) -> Result<(), Box<dyn std::error::Error>> {
+    // Two samples spaced past the kernel jiffy, otherwise the /proc/stat delta
+    // is zero and the CPU line always reads 0.0% on real hardware.
+    let _first = backend.sample();
+    std::thread::sleep(Duration::from_millis(250));
     let snapshot = backend.sample();
     println!("amdtop {} — discovery", env!("CARGO_PKG_VERSION"));
     println!(
         "  {:<14} meters={}, graphs={} (TERM={}, LANG={})",
         "glyphs",
-        if unicode_supported() { "blocks" } else { "ascii" },
-        if unicode_supported() && !console_lacks_braille() {
-            "braille"
-        } else {
-            "ascii"
-        },
+        if theme.ascii { "ascii" } else { "blocks" },
+        if theme.graph_ascii { "ascii" } else { "braille" },
         std::env::var("TERM").unwrap_or_default(),
         std::env::var("LANG").unwrap_or_default()
     );
@@ -197,7 +197,6 @@ fn frames_mode<B: Backend>(
     for frame_index in 0..frames {
         std::thread::sleep(gap);
         sampler.tick();
-        app.ticks = sampler.ticks;
         let mut buffer = ratatui::buffer::Buffer::empty(area);
         ui::render(area, &mut buffer, &app, &sampler.last, &sampler.history, &theme);
         if frames > 1 {
@@ -238,7 +237,7 @@ fn buffer_to_text(buffer: &ratatui::buffer::Buffer) -> String {
 
 /// Approximate ANSI rendering: one escape per cell whose colour changed.
 fn buffer_to_ansi(buffer: &ratatui::buffer::Buffer) -> String {
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
     let area = buffer.area;
     let fg_code = |color: Color| -> String {
         match color {
@@ -289,15 +288,17 @@ fn buffer_to_ansi(buffer: &ratatui::buffer::Buffer) -> String {
     let mut out = String::new();
     for y in 0..area.height {
         let mut line = String::new();
-        let mut current: Option<(Color, Color)> = None;
+        let mut current: Option<(Color, Color, bool)> = None;
         for x in 0..area.width {
             let Some(cell) = buffer.cell((x, y)) else {
                 continue;
             };
-            let pair = (cell.fg, cell.bg);
+            let bold = cell.modifier.contains(Modifier::BOLD);
+            let pair = (cell.fg, cell.bg, bold);
             if current != Some(pair) {
                 line.push_str(&fg_code(cell.fg));
                 line.push_str(&bg_code(cell.bg));
+                line.push_str(if bold { "\x1b[1m" } else { "\x1b[22m" });
                 current = Some(pair);
             }
             line.push_str(cell.symbol());
@@ -333,7 +334,13 @@ fn interactive<B: Backend>(
         })?;
 
         let interval = Duration::from_millis(app.interval_ms);
-        let timeout = interval.saturating_sub(last_tick.elapsed());
+        // While paused there is no tick to wait for: poll the full interval so
+        // the loop sleeps on input instead of spinning at 100% CPU.
+        let timeout = if app.paused {
+            interval
+        } else {
+            interval.saturating_sub(last_tick.elapsed())
+        };
         if event::poll(timeout)? {
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -388,7 +395,6 @@ fn handle_key(
     }
     let visible = ui::proc::visible(app, &sampler.last).len();
     app.clamp_selection(visible);
-    app.ticks = sampler.ticks;
     Ok(())
 }
 

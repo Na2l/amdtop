@@ -25,12 +25,6 @@ pub struct LinuxBackend {
 
 impl LinuxBackend {
     pub fn new() -> Self {
-        Self::with_options(false)
-    }
-
-    /// `force_gpu_scan` retries discovery even when nothing was found, which is
-    /// useful for `--debug` output.
-    pub fn with_options(_force_gpu_scan: bool) -> Self {
         let cpu = CpuReader::new();
         let gpu_device = gpu::discover();
         let dri = ttm::find_dri_dir(gpu_device.as_ref().and_then(|g| g.primary_minor));
@@ -61,11 +55,14 @@ impl Backend for LinuxBackend {
         let engines = self.procs.engine_ratios();
         let disks = self.disks.sample(wall);
         let net = self.net.sample(wall);
+        // Re-read the battery every sample so the menu bar tracks discharge;
+        // keep the cached value if the entry vanished mid-run.
+        let battery = crate::collect::system::read_battery().or_else(|| self.battery.clone());
         Snapshot {
             wall,
             disks,
             net,
-            battery: self.battery.clone(),
+            battery,
             hostname: self.hostname.clone(),
             cpu,
             gpu,

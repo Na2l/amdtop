@@ -15,8 +15,9 @@ pub struct NetStats {
 
 /// Container/bridge links are noise in a btop-style net box.
 pub fn virtual_interface(name: &str) -> bool {
-    const VIRTUAL: [&str; 9] = [
-        "lo", "docker", "veth", "br-", "virbr", "tun", "tap", "vnet", "dummy",
+    const VIRTUAL: [&str; 17] = [
+        "lo", "docker", "veth", "br-", "virbr", "tun", "tap", "vnet", "dummy", "wg", "kube",
+        "flannel", "cni", "cali", "lxc", "vbox", "vmnet",
     ];
     VIRTUAL.iter().any(|prefix| name.starts_with(prefix))
 }
@@ -73,10 +74,12 @@ impl NetReader {
             self.prev.insert(name, (rx, tx));
             out.push(stats);
         }
+        // Order by cumulative traffic, not instantaneous rate: a rate sort made
+        // the "first" interface flip between ticks, so the net box title and the
+        // history graph jumped between links.
         out.sort_by(|a, b| {
-            (b.rx_bps + b.tx_bps)
-                .partial_cmp(&(a.rx_bps + a.tx_bps))
-                .unwrap_or(std::cmp::Ordering::Equal)
+            (b.rx_total + b.tx_total)
+                .cmp(&(a.rx_total + a.tx_total))
         });
         out
     }
@@ -92,6 +95,9 @@ mod tests {
         assert!(virtual_interface("veth01fadc0"));
         assert!(virtual_interface("br-7bfd35593f7a"));
         assert!(virtual_interface("lo"));
+        assert!(virtual_interface("wg0"));
+        assert!(virtual_interface("kube-ipvs0"));
+        assert!(virtual_interface("flannel.1"));
         assert!(!virtual_interface("eno1"));
         assert!(!virtual_interface("wlp195s0"));
     }

@@ -60,7 +60,7 @@ OPTIONS:
     -d, --demo              run against a simulated Strix Halo (no AMD GPU needed)
     -i, --interval <ms>     refresh interval in milliseconds [default: 1000]
         --history <n>       samples kept for graphs [default: 600]
-        --tab <name>        initial tab: dash|cpu|gpu|mem|proc
+        --tab <name>        initial tab: dash|cpu|gpu|mem|proc|io
         --mem-view <name>   initial memory view: cpu|gpu|ttm|unified
         --gpu-only          hide processes without GPU memory in the process list
         --size <WxH>        render size for --frames [default: 120x38]
@@ -71,7 +71,7 @@ OPTIONS:
     -V, --version           print version
 
 SCRIPTING / SCREENSHOTS:
-        --json              print one JSON snapshot to stdout and exit
+        --json              print one JSON snapshot (top 100 procs) and exit
         --frames <n>        render n frames without a terminal (for CI/screenshots)
         --out <path>        output file for --frames ('-' = stdout)
         --plain             strip colours from --frames output
@@ -79,12 +79,13 @@ SCRIPTING / SCREENSHOTS:
 
 KEYS:
     q / Ctrl-C  quit        ? / h     help
-    Tab / 1-4   tabs        m         cycle memory views (CPU/GPU/TTM/Unified)
+    Tab / 1-6   tabs        m         cycle memory views (CPU/GPU/TTM/Unified)
     +/-         interval    space     pause
-    up/down     scroll      PgUp/PgDn page
+    up/down j/k select      PgUp/PgDn page
     f           filter      /         filter by user
-    c/p/n/g/v/t sort by cpu/pid/mem/gtt/vram/time
-    k           kill        e         expand/collapse tree
+    c p n t u N g v r       sort by cpu/pid/mem/time/user/command/gtt/vram/gpu
+    K then y    SIGTERM     e         process tree on/off
+    M           mirrored graphs       G  GPU-only rows
 ";
 
 fn needs_value(name: &str) -> bool {

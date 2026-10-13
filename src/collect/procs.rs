@@ -274,6 +274,7 @@ impl ProcReader {
                 .map(|text| parse_statm(&text))
                 .unwrap_or((0, stat.rss_pages, 0));
 
+            let was_known = self.prev.contains_key(&pid);
             let ticks = stat.utime + stat.stime;
             let cpu = match self.prev.get(&pid) {
                 Some(prev)
@@ -305,11 +306,14 @@ impl ProcReader {
                 })
                 .unwrap_or(0);
 
+            // Trust the cached cmdline only for a pid seen in the *previous*
+            // sample: a recycled pid must re-read, or it inherits the dead
+            // process' command line.
             let cmdline = self
                 .cmdline_cache
                 .get(&pid)
                 .cloned()
-                .filter(|_| self.prev.contains_key(&pid))
+                .filter(|_| was_known)
                 .unwrap_or_else(|| {
                     let value = util::read_raw(base.join("cmdline"))
                         .map(|text| parse_cmdline(&text))
@@ -440,15 +444,20 @@ impl ProcReader {
                 cache.insert(pid, stats);
             }
         }
-        let window = self.engine_window;
-        if window > 0.0 {
-            self.prev_engine_totals = self.engine_totals.clone();
+        match self.gpu_scan_at {
+            // First scan: baseline the cumulative counters so the first ratios
+            // come out at zero instead of the whole since-boot total.
+            None => {
+                self.prev_engine_totals = totals.clone();
+                self.engine_window = self.gpu_scan_interval.max(0.001);
+            }
+            Some(at) => {
+                self.prev_engine_totals = std::mem::take(&mut self.engine_totals);
+                // The window is the wall time between scans, not the scan duration.
+                self.engine_window = at.elapsed().as_secs_f64().max(0.001);
+            }
         }
         self.engine_totals = totals;
-        self.engine_window = started.elapsed().as_secs_f64().max(0.0);
-        // The window is the wall time between scans, not the scan duration.
-        self.engine_window = self.gpu_scan_interval.max(0.001);
-        let _ = window;
         self.gpu_cache = cache;
         self.gpu_scan_ms = started.elapsed().as_secs_f64() * 1000.0;
         self.gpu_scan_at = Some(Instant::now());

@@ -11,8 +11,18 @@ use crate::util;
 
 use super::widgets;
 
-/// Network box: interface name, up/down rates and sparklines.
-pub fn net_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, theme: &Theme) {
+/// Network box: two btop-style braille graphs (download above upload) with the
+/// live speed painted inside each graph and the cumulative total in its
+/// bottom-right corner — the same histogram style as the CPU/GPU boxes. Falls
+/// back to a compact rate line plus sparklines when the box is too short.
+pub fn net_box(
+    area: Rect,
+    buf: &mut Buffer,
+    snap: &Snapshot,
+    hist: &History,
+    theme: &Theme,
+    mirrored: bool,
+) {
     let title = match snap.net.first() {
         Some(iface) => format!("net · {}", iface.name),
         None => "net".to_string(),
@@ -35,50 +45,99 @@ pub fn net_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, th
 
     let arrow_down = if theme.ascii { "v" } else { "▼" };
     let arrow_up = if theme.ascii { "^" } else { "▲" };
-    let mut lines = vec![Line::from(vec![
-        Span::styled(format!("{} ", arrow_down), Style::default().fg(crate::theme::GOOD)),
-        Span::styled(
-            util::human_rate(Some(iface.rx_bps)),
-            Style::default()
-                .fg(crate::theme::GOOD)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("   ", Style::default()),
-        Span::styled(format!("{} ", arrow_up), Style::default().fg(crate::theme::CPU_ACCENT)),
-        Span::styled(
-            util::human_rate(Some(iface.tx_bps)),
-            Style::default()
-                .fg(crate::theme::CPU_ACCENT)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ])];
-    lines.push(widgets::kv(
-        "total",
-        format!(
-            "{} in / {} out",
-            util::human_bytes(iface.rx_total),
-            util::human_bytes(iface.tx_total)
-        ),
-        theme,
-    ));
-    // Sparklines fill the rest of the box.
-    let mut used = lines.len() as u16;
-    if inner.height > used + 1 {
-        let peak = hist
-            .net_rx
-            .max()
-            .unwrap_or(0.0)
-            .max(hist.net_tx.max().unwrap_or(0.0))
-            .max(1024.0);
-        lines.push(widgets::spark(
-            &hist.net_rx.values(),
-            inner.width as usize,
-            peak,
-            theme,
-            Gradient::Download,
-        ));
-        used += 1;
-        if inner.height > used {
+    // One shared peak so the two directions stay comparable, like btop.
+    let peak = hist
+        .net_rx
+        .max()
+        .unwrap_or(0.0)
+        .max(hist.net_tx.max().unwrap_or(0.0))
+        .max(1024.0);
+
+    if inner.height >= 4 {
+        let half = inner.height / 2;
+        let rx = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: half,
+        };
+        let tx = Rect {
+            x: inner.x,
+            y: inner.y + half,
+            width: inner.width,
+            height: inner.height - half,
+        };
+        widgets::usage_graph(rx, buf, &hist.net_rx.values(), peak, theme, Gradient::Download, mirrored);
+        widgets::usage_graph(tx, buf, &hist.net_tx.values(), peak, theme, Gradient::Upload, mirrored);
+        // The live speed rides inside each graph, btop style.
+        let rate = |arrow: &str, value: f64, color: ratatui::style::Color| {
+            Line::from(vec![
+                Span::styled(format!("{arrow} "), Style::default().fg(color)),
+                Span::styled(
+                    util::human_rate(Some(value)),
+                    Style::default()
+                        .fg(color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])
+        };
+        buf.set_line(
+            rx.x,
+            rx.y,
+            &rate(arrow_down, iface.rx_bps, crate::theme::GOOD),
+            rx.width,
+        );
+        buf.set_line(
+            tx.x,
+            tx.y,
+            &rate(arrow_up, iface.tx_bps, crate::theme::CPU_ACCENT),
+            tx.width,
+        );
+        // Cumulative totals in the bottom-right corner of each graph.
+        for (graph, total) in [(rx, iface.rx_total), (tx, iface.tx_total)] {
+            let text = util::human_bytes(total);
+            let width = text.chars().count() as u16;
+            if width + 2 < graph.width {
+                buf.set_line(
+                    graph.right().saturating_sub(width),
+                    graph.bottom().saturating_sub(1),
+                    &Line::from(Span::styled(
+                        text,
+                        Style::default().fg(crate::theme::DIM),
+                    )),
+                    width,
+                );
+            }
+        }
+    } else {
+        // Too short for graphs: compact rate line plus sparklines.
+        let mut lines = vec![Line::from(vec![
+            Span::styled(format!("{} ", arrow_down), Style::default().fg(crate::theme::GOOD)),
+            Span::styled(
+                util::human_rate(Some(iface.rx_bps)),
+                Style::default()
+                    .fg(crate::theme::GOOD)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("   ", Style::default()),
+            Span::styled(format!("{} ", arrow_up), Style::default().fg(crate::theme::CPU_ACCENT)),
+            Span::styled(
+                util::human_rate(Some(iface.tx_bps)),
+                Style::default()
+                    .fg(crate::theme::CPU_ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])];
+        if inner.height >= 2 {
+            lines.push(widgets::spark(
+                &hist.net_rx.values(),
+                inner.width as usize,
+                peak,
+                theme,
+                Gradient::Download,
+            ));
+        }
+        if inner.height >= 3 {
             lines.push(widgets::spark(
                 &hist.net_tx.values(),
                 inner.width as usize,
@@ -87,8 +146,8 @@ pub fn net_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, th
                 Gradient::Upload,
             ));
         }
+        widgets::lines(inner, buf, lines);
     }
-    widgets::lines(inner, buf, lines);
 }
 
 /// Disk box: per-device read/write rates and busy percentage.

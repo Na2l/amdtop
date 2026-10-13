@@ -25,8 +25,7 @@ pub fn read_battery() -> Option<BatteryInfo> {
         let dir: PathBuf = entry.path();
         let capacity = util::read_u64(dir.join("capacity")).map(|value| value as f64);
         let micro = |file: &str| util::read_u64(dir.join(file)).map(|value| value as f64 / 1e6);
-        let power_w = micro("power_now")
-            .or_else(|| micro("energy_now").zip(micro("energy_full")).map(|_| 0.0));
+        let power_w = micro("power_now");
         let energy_wh = micro("energy_now");
         let energy_full_wh = micro("energy_full");
         let status = util::read_trim(dir.join("status")).unwrap_or_default();

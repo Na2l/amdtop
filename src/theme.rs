@@ -2,8 +2,9 @@
 //! (`Default_theme`), plus the 3-stop gradient interpolation btop uses.
 //!
 //! Two-digit values in btop's table (`"#ee"`) mean a repeated byte (`#eeeeee`).
-//! Nothing here ever sets a background colour for the whole screen: like btop
-//! with `theme_background = False`, the terminal's own background shows through.
+//! The screen is painted with btop's `main_bg` unless `--transparent` is passed
+//! (btop's `theme_background = False`), in which case the terminal's own
+//! background shows through.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders};

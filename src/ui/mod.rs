@@ -145,12 +145,10 @@ pub struct App {
     pub collapsed: std::collections::HashSet<u32>,
     pub gpu_only: bool,
     pub selected: usize,
-    pub scroll: usize,
     pub cpu_scroll: usize,
     pub message: Option<String>,
     pub kill_pending: bool,
     pub kill_target: Option<u32>,
-    pub ticks: u64,
     /// True when running against the simulated Strix Halo backend.
     pub sim: bool,
     /// Draw usage histograms centred on their middle line (btop style).
@@ -183,12 +181,10 @@ impl App {
             collapsed: std::collections::HashSet::new(),
             gpu_only: args.gpu_only,
             selected: 0,
-            scroll: 0,
             cpu_scroll: 0,
             message: None,
             kill_pending: false,
             kill_target: None,
-            ticks: 0,
             sim: false,
             mirror_graphs: true,
         }
@@ -279,10 +275,12 @@ impl App {
             KeyCode::Char('f') => {
                 self.filter_active = true;
                 self.filter.clear();
+                self.user_filter.clear();
                 Action::Redraw
             }
             KeyCode::Char('/') => {
                 self.filter_active = true;
+                self.filter.clear();
                 self.user_filter.clear();
                 Action::Redraw
             }
@@ -371,9 +369,6 @@ impl App {
         if self.selected >= len {
             self.selected = len.saturating_sub(1);
         }
-        if self.scroll > self.selected {
-            self.scroll = self.selected;
-        }
     }
 }
 
@@ -430,10 +425,11 @@ fn draw_menu(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, _theme: &
         }
         x += label.chars().count() as u16;
     }
-    // Memory sub-views are exposed here while the MEM tab is open.
+    // Memory sub-views are exposed here while the MEM tab is open. They are
+    // labelled, not numbered: digits always switch tabs, `m` cycles the view.
     if app.tab == Tab::Mem {
-        for (index, view) in MemView::ALL.iter().enumerate() {
-            let label = format!(" {}.{} ", index + 1, view.label());
+        for view in MemView::ALL.iter() {
+            let label = format!(" {} ", view.label());
             let active = *view == app.mem_view;
             let style = if active {
                 Style::default()
@@ -539,7 +535,7 @@ fn draw_body(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, hist: &Hi
         Tab::Gpu => gpu::full(area, buf, app, snap, hist, theme),
         Tab::Mem => mem::full(area, buf, app, snap, hist, theme),
         Tab::Proc => proc::full(area, buf, app, snap, theme),
-        Tab::Io => draw_io(area, buf, snap, hist, theme),
+        Tab::Io => draw_io(area, buf, app, snap, hist, theme),
     }
 }
 
@@ -606,18 +602,18 @@ fn draw_dash(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, hist: &Hi
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(left[1]);
     system::disk_box(io[0], buf, snap, hist, theme);
-    system::net_box(io[1], buf, snap, hist, theme);
+    system::net_box(io[1], buf, snap, hist, theme, app.mirror_graphs);
     // Right half: the process list, full height.
     proc::btop_box(bottom[1], buf, app, snap, theme);
 }
 
 /// Network and disk I/O tab (the dashboard keeps to the four main boxes).
-fn draw_io(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, theme: &Theme) {
+fn draw_io(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, hist: &History, theme: &Theme) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
-    system::net_box(rows[0], buf, snap, hist, theme);
+    system::net_box(rows[0], buf, snap, hist, theme, app.mirror_graphs);
     system::disk_box(rows[1], buf, snap, hist, theme);
 }
 
@@ -672,16 +668,16 @@ fn draw_help(area: Rect, buf: &mut Buffer, theme: &Theme) {
         "  q / Ctrl-C   quit                 ? / h    toggle this help",
         "  Tab / 1-6    switch tab           space    pause sampling",
         "  m            cycle memory view    +/-      sampling interval",
-        "  1-4 (MEM)    cpu / gpu / ttm / unified",
         "",
         "  process list",
-        "    up/down    select               PgUp/PgDn page",
+        "    up/down j/k select             PgUp/PgDn page",
         "    f          filter command       /        filter by user",
         "    c %CPU   p PID   n %MEM   t TIME+   u USER   N COMMAND",
+        "    g GTT    v VRAM  r GPU total       G      GPU-only rows",
+        "    K then y   SIGTERM the selected process",
         "",
         "  display",
         "    M          toggle mirrored (centred) usage histograms",
-        "    g GTT    v VRAM  r GPU total       G      GPU-only rows",
         "    e          process tree on/off",
         "",
         "  Memory views: CPU RAM = what the kernel gives processes.",

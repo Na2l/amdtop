@@ -283,7 +283,7 @@ fn draw_core_rows(
 }
 
 fn draw_stats(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, theme: &Theme) {
-    if area.width < 10 || area.height < 4 {
+    if area.width < 14 || area.height < 4 {
         return;
     }
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -295,7 +295,7 @@ fn draw_stats(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, the
     let max_freq = snap.cpu.max_freq_mhz();
     lines.push(widgets::kv(
         "model",
-        util::truncate(&snap.cpu.model, area.width as usize - 12),
+        util::truncate(&snap.cpu.model, (area.width as usize).saturating_sub(12).max(4)),
         theme,
     ));
     lines.push(widgets::kv("threads", snap.cpu.nproc.to_string(), theme));

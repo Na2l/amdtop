@@ -23,7 +23,6 @@ use super::{App, MemView};
 pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, theme: &Theme) {
     let mem = &snap.mem;
     let gtt = snap.gpu.as_ref().and_then(|g| g.gtt_used).unwrap_or(0);
-    let vram = snap.gpu.as_ref().and_then(|g| g.vram_used).unwrap_or(0);
     let title = format!("mem · {}", util::human_bytes(mem.total));
     let inner = widgets::panel(theme.block(&title, crate::theme::MEM_BOX), area, buf);
     if inner.width < 14 || inner.height == 0 {
@@ -107,7 +106,6 @@ pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, t
             Gradient::Cpu,
         );
     }
-    let _ = vram;
 }
 
 /// Full MEM tab, dispatching on the selected view.
@@ -648,7 +646,7 @@ fn view_unified(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, t
         Gradient::Available,
     );
 
-    let graph_inner = widgets::panel(theme.block("CPU vs GTT over time", crate::theme::MEM_BOX), rows[2], buf);
+    let graph_inner = widgets::panel(theme.block("GTT over time", crate::theme::MEM_BOX), rows[2], buf);
     if graph_inner.width > 2 && graph_inner.height > 1 {
         widgets::graph(
             graph_inner,
@@ -689,7 +687,6 @@ fn view_unified(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, t
         )),
     ];
     widgets::lines(details, buf, lines);
-    let _ = hist;
 }
 
 fn breakdown_line(label: &str, value: u64, total: f64, color: ratatui::style::Color, _theme: &Theme) -> Line<'static> {

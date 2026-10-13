@@ -67,6 +67,16 @@ pub fn visible<'a>(app: &App, snap: &'a Snapshot) -> Vec<(&'a ProcInfo, usize)> 
     }
 }
 
+/// What the COMMAND column shows: the full command line, or the comm for
+/// kernel threads whose cmdline is empty.
+fn display_command(proc: &ProcInfo) -> &str {
+    if proc.cmdline.is_empty() {
+        &proc.comm
+    } else {
+        &proc.cmdline
+    }
+}
+
 fn sort_rows(rows: &mut [&ProcInfo], key: SortKey, desc: bool) {
     let compare = |a: &ProcInfo, b: &ProcInfo| match key {
         SortKey::Cpu => a.cpu.partial_cmp(&b.cpu).unwrap_or(std::cmp::Ordering::Equal),
@@ -76,7 +86,9 @@ fn sort_rows(rows: &mut [&ProcInfo], key: SortKey, desc: bool) {
         SortKey::Vram => a.vram.cmp(&b.vram),
         SortKey::GpuTotal => a.gpu_total().cmp(&b.gpu_total()),
         SortKey::Time => a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal),
-        SortKey::Name => a.comm.to_ascii_lowercase().cmp(&b.comm.to_ascii_lowercase()),
+        SortKey::Name => display_command(a)
+            .to_ascii_lowercase()
+            .cmp(&display_command(b).to_ascii_lowercase()),
         SortKey::User => a.user.cmp(&b.user),
     };
     if desc {

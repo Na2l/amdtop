@@ -140,7 +140,7 @@ pub fn sample(dev: &GpuDevice) -> GpuSample {
             "vis_vram_used" => sample.vis_vram_used = Some(value),
             "gtt_total" => sample.gtt_total = Some(value),
             "gtt_used" => sample.gtt_used = Some(value),
-            other => sample.extra_mem.push((other.to_string(), None, None)),
+            other => sample.extra_mem.push((other.to_string(), Some(value), None)),
         }
     }
 

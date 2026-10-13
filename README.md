@@ -58,7 +58,11 @@ graphs. Press `M` to switch them back to growing up from the bottom.
 Idle graphs still draw their baseline (in btop's `graph_text` colour) so the
 histograms are always visible, even at 0%.
 
-Net and disk I/O also have a full-size view on the **IO** tab (`6`).
+Net and disk I/O also have a full-size view on the **IO** tab (`6`). There the
+net box draws download and upload as two braille histograms — same style as the
+CPU/GPU graphs, `M` toggles them too — with the live speed painted inside each
+graph and the cumulative total in its corner. On the dashboard the net box is
+too short for graphs, so it keeps the compact rate line plus sparklines.
 
 Colours are btop's own defaults, copied from `btop_theme.cpp`'s `Default_theme`
 so the two look alike side by side:
@@ -154,20 +158,19 @@ sudo ./dist/amdtop         # + full TTM debugfs view
 | `m` | cycle memory views: CPU RAM → GPU → TTM → Unified |
 | `space` | pause sampling |
 | `+` / `-` | sampling interval |
-| `↑` `↓` `PgUp` `PgDn` | scroll (core list on the CPU tab, selection elsewhere) |
+| `↑` `↓` `j` `k` `PgUp` `PgDn` | scroll (core list on the CPU tab, selection elsewhere) |
 | `f` / `/` | filter command / filter user |
 | `c` `p` `n` `t` `u` `N` | sort by %CPU, PID, %MEM, TIME+, USER, COMMAND |
 | `g` `v` `r` | sort by GTT, VRAM, total GPU memory |
 | `G` | show only processes with GPU memory |
 | `e` | process tree |
-| `N` | sort by command |
 | `M` | mirrored (centred) vs bottom-up histograms |
 | `K` then `y` | send SIGTERM to the selected process |
 
 ### Scripting / screenshots
 
 ```sh
-./dist/amdtop --json                  # one JSON snapshot (two samples, so rates are real)
+./dist/amdtop --json                  # one JSON snapshot (two samples, so rates are real; top 100 procs)
 ./dist/amdtop --debug                 # print discovered devices and counters
 ./dist/amdtop --frames 1 --plain --size 140x36 > shot.txt
 ./dist/amdtop --frames 1 --size 140x36 --out shot.ansi
