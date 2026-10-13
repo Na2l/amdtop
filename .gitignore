@@ -1,0 +1,13 @@
+# Rust build output — keep only the release executable.
+/target/*
+!/target/release/
+/target/release/*
+!/target/release/amdtop
+
+# Docker build output — keep only the exported executable.
+/dist/*
+!/dist/amdtop
+
+# Screenshot and scripting output from --frames / --out.
+/shot.ansi
+/shot.txt

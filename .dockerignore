@@ -1,0 +1,8 @@
+# Keep the build context small; only Cargo.toml, Cargo.lock, src/ and README.md
+# are used by the Dockerfile.
+target
+.git
+docs
+tools
+*.ansi
+*.txt

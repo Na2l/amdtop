@@ -1,0 +1,22 @@
+[package]
+name = "amdtop"
+version = "0.1.0"
+edition = "2021"
+description = "btop-style terminal monitor for AMD Strix Halo: CPU, GPU, VRAM/GTT/TTM and per-process GPU memory"
+license-file = "LICENSE"
+readme = "README.md"
+
+[[bin]]
+name = "amdtop"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+libc = "0.2"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 1
+strip = true
