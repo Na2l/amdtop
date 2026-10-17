@@ -7,12 +7,13 @@ use crate::collect::cpu::CpuReader;
 use crate::collect::disks::DiskReader;
 use crate::collect::net::NetReader;
 use crate::collect::procs::ProcReader;
-use crate::collect::{gpu, mem, ttm, Backend, Snapshot};
+use crate::collect::{gpu, mem, npu, ttm, Backend, Snapshot};
 use crate::util;
 
 pub struct LinuxBackend {
     cpu: CpuReader,
     gpu: Option<gpu::GpuDevice>,
+    npu: Option<npu::NpuReader>,
     dri: Option<PathBuf>,
     procs: ProcReader,
     disks: DiskReader,
@@ -27,6 +28,7 @@ impl LinuxBackend {
     pub fn new() -> Self {
         let cpu = CpuReader::new();
         let gpu_device = gpu::discover();
+        let npu = npu::NpuReader::new();
         let dri = ttm::find_dri_dir(gpu_device.as_ref().and_then(|g| g.primary_minor));
         let kernel = util::read_trim("/proc/sys/kernel/osrelease").unwrap_or_default();
         LinuxBackend {
@@ -38,6 +40,7 @@ impl LinuxBackend {
             cpu,
             dri,
             gpu: gpu_device,
+            npu,
             started: Instant::now(),
             kernel,
         }
@@ -50,6 +53,7 @@ impl Backend for LinuxBackend {
         let cpu = self.cpu.sample();
         let mem = mem::read_meminfo();
         let gpu = self.gpu.as_ref().map(gpu::sample);
+        let npu = self.npu.as_mut().map(|reader| reader.sample());
         let ttm = ttm::read(self.dri.as_deref());
         let procs = self.procs.sample(wall, mem.total);
         let engines = self.procs.engine_ratios();
@@ -66,6 +70,7 @@ impl Backend for LinuxBackend {
             hostname: self.hostname.clone(),
             cpu,
             gpu,
+            npu,
             mem,
             ttm,
             procs,
@@ -104,6 +109,32 @@ impl Backend for LinuxBackend {
                 ));
             }
             None => out.push(("amdgpu".to_string(), "no AMD GPU found".to_string())),
+        }
+        match &self.npu {
+            Some(reader) => {
+                let sample = reader.peek();
+                out.push(("npu".to_string(), sample.label().to_string()));
+                out.push(("npu node".to_string(), sample.node.clone()));
+                out.push(("npu bdf".to_string(), sample.bdf.clone()));
+                out.push(("npu driver".to_string(), sample.driver.clone()));
+                out.push(("npu fw".to_string(), sample.fw.clone()));
+                out.push((
+                    "npu array".to_string(),
+                    format!(
+                        "{} cols x {} rows, AIE {}",
+                        sample.cols.unwrap_or(0),
+                        sample.rows.unwrap_or(0),
+                        sample
+                            .aie_version
+                            .map(|(major, minor)| format!("{}.{}", major, minor))
+                            .unwrap_or_else(|| "?".to_string())
+                    ),
+                ));
+                if let Some(error) = &sample.error {
+                    out.push(("npu error".to_string(), error.clone()));
+                }
+            }
+            None => out.push(("npu".to_string(), "no amdxdna device found".to_string())),
         }
         out.push((
             "ttm debugfs".to_string(),

@@ -3,6 +3,7 @@
 pub mod cpu;
 pub mod gpu;
 pub mod mem;
+pub mod npu;
 pub mod proc;
 pub mod system;
 pub mod widgets;
@@ -29,10 +30,11 @@ pub enum Tab {
     Mem,
     Proc,
     Io,
+    Npu,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [Tab::Dash, Tab::Cpu, Tab::Gpu, Tab::Mem, Tab::Proc, Tab::Io];
+    pub const ALL: [Tab; 7] = [Tab::Dash, Tab::Cpu, Tab::Gpu, Tab::Mem, Tab::Proc, Tab::Io, Tab::Npu];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -42,6 +44,7 @@ impl Tab {
             Tab::Mem => "MEM",
             Tab::Proc => "PROC",
             Tab::Io => "IO",
+            Tab::Npu => "NPU",
         }
     }
 
@@ -53,6 +56,7 @@ impl Tab {
             "mem" | "3" => Some(Tab::Mem),
             "proc" | "process" | "4" => Some(Tab::Proc),
             "io" | "net" | "disks" | "6" => Some(Tab::Io),
+            "npu" | "7" => Some(Tab::Npu),
             _ => None,
         }
     }
@@ -254,6 +258,7 @@ impl App {
             KeyCode::Char('4') => self.set_tab(Tab::Mem),
             KeyCode::Char('5') => self.set_tab(Tab::Proc),
             KeyCode::Char('6') => self.set_tab(Tab::Io),
+            KeyCode::Char('7') => self.set_tab(Tab::Npu),
             KeyCode::Char('m') => {
                 let index = MemView::ALL.iter().position(|v| *v == self.mem_view).unwrap_or(0);
                 self.mem_view = MemView::ALL[(index + 1) % MemView::ALL.len()];
@@ -500,9 +505,10 @@ fn draw_menu(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, _theme: &
         ));
     }
     let width: usize = right.iter().map(|span| span.content.chars().count()).sum();
-    if (width as u16) < area.width.saturating_sub(8) {
+    let right_start = area.right().saturating_sub(width as u16);
+    if (width as u16) < area.width.saturating_sub(8) && right_start > x + 1 {
         buf.set_line(
-            area.right().saturating_sub(width as u16),
+            right_start,
             area.top(),
             &Line::from(right),
             width as u16,
@@ -536,6 +542,7 @@ fn draw_body(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, hist: &Hi
         Tab::Mem => mem::full(area, buf, app, snap, hist, theme),
         Tab::Proc => proc::full(area, buf, app, snap, theme),
         Tab::Io => draw_io(area, buf, app, snap, hist, theme),
+        Tab::Npu => npu::full(area, buf, app, snap, hist, theme),
     }
 }
 
@@ -553,23 +560,41 @@ fn draw_body(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, hist: &Hi
 fn draw_dash(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, hist: &History, theme: &Theme) {
     // The CPU box needs its top block plus as many rows as the core grid; the GPU
     // box fits its histogram, four bars and a sensor line.
-    let cell_min: u16 = 18;
+    let cell_min: u16 = 16;
     // The cores panel is the 58% one (right of the histogram); size height off it.
     let core_box_width = (area.width as u32 * 58 / 100) as u16;
     let columns = ((core_box_width.saturating_sub(2)) / cell_min).max(1) as usize;
     let core_rows = snap.cpu.per_core.len().div_ceil(columns.max(1)) as u16;
     let head = cpu::head_rows(area.height);
     // borders (2) + top block + one row per core-grid row
-    let cpu_height = (head + core_rows + 2).clamp(6, (area.height / 2).max(6));
-    let gpu_height = 8u16.min(area.height / 4);
+    let gpu_height = 7u16;
+    let npu_height = if snap.npu.is_some() && area.height >= 30 {
+        6u16
+    } else {
+        0
+    };
+    let bottom_min = 6u16;
+    let cpu_limit = area
+        .height
+        .saturating_sub(gpu_height + npu_height + bottom_min)
+        .max(6);
+    let cpu_height = (head + core_rows + 2)
+        .clamp(6, (area.height / 2).max(6))
+        .min(cpu_limit)
+        .max(6);
+    let mut constraints = vec![
+        Constraint::Length(cpu_height),
+        Constraint::Length(gpu_height),
+    ];
+    if npu_height > 0 {
+        constraints.push(Constraint::Length(npu_height));
+    }
+    constraints.push(Constraint::Min(bottom_min));
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(cpu_height),
-            Constraint::Length(gpu_height),
-            Constraint::Min(6),
-        ])
+        .constraints(constraints)
         .split(area);
+    let bottom_row = if npu_height > 0 { 3 } else { 2 };
 
     // CPU row mirrors the GPU row: usage histogram on the left, cores to its right.
     let cpu_cols = Layout::default()
@@ -587,10 +612,14 @@ fn draw_dash(area: Rect, buf: &mut Buffer, app: &App, snap: &Snapshot, hist: &Hi
     gpu::histogram_box(gpu_cols[0], buf, snap, hist, theme, app.mirror_graphs);
     gpu::btop_box(gpu_cols[1], buf, snap, hist, theme);
 
+    if npu_height > 0 {
+        npu::dashboard(rows[2], buf, snap, hist, theme, app.mirror_graphs);
+    }
+
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
-        .split(rows[2]);
+        .split(rows[bottom_row]);
     // Left half: memory above, disks and network side by side beneath it.
     let left = Layout::default()
         .direction(Direction::Vertical)
@@ -666,7 +695,7 @@ fn draw_help(area: Rect, buf: &mut Buffer, theme: &Theme) {
         "amdtop keys",
         "",
         "  q / Ctrl-C   quit                 ? / h    toggle this help",
-        "  Tab / 1-6    switch tab           space    pause sampling",
+        "  Tab / 1-7    switch tab           space    pause sampling",
         "  m            cycle memory view    +/-      sampling interval",
         "",
         "  process list",
@@ -742,7 +771,7 @@ mod tests {
         out
     }
 
-    fn render_tab(tab: Tab, mem_view: MemView) -> String {
+    fn snapshot_and_history() -> (Snapshot, History) {
         let mut backend = SimBackend::new();
         let mut history = History::new(64, 32);
         let mut snap = backend.sample();
@@ -750,6 +779,10 @@ mod tests {
             snap = backend.sample();
             history.push(&snap);
         }
+        (snap, history)
+    }
+
+    fn render_buffer(tab: Tab, mem_view: MemView, snap: &Snapshot, history: &History) -> Buffer {
         let mut app = App::new(&crate::args::Args::default());
         app.tab = tab;
         app.mem_view = mem_view;
@@ -762,8 +795,26 @@ mod tests {
         };
         let mut buf = Buffer::empty(area);
         let theme = Theme::new(false, true);
-        render(area, &mut buf, &app, &snap, &history, &theme);
-        buffer_text(&buf)
+        render(area, &mut buf, &app, snap, history, &theme);
+        buf
+    }
+
+    fn render_tab(tab: Tab, mem_view: MemView) -> String {
+        let (snap, history) = snapshot_and_history();
+        buffer_text(&render_buffer(tab, mem_view, &snap, &history))
+    }
+
+    fn row_of(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
+        for y in 0..buf.area.height {
+            let mut line = String::new();
+            for x in 0..buf.area.width {
+                line.push_str(buf.cell((x, y)).map(|cell| cell.symbol()).unwrap_or(" "));
+            }
+            if let Some(offset) = line.find(needle) {
+                return Some((offset as u16, y));
+            }
+        }
+        None
     }
 
     #[test]
@@ -789,13 +840,29 @@ mod tests {
     fn dashboard_has_btop_boxes() {
         let text = render_tab(Tab::Dash, MemView::Unified);
         // btop preset: cpu and gpu0 on top, proc and mem underneath.
-        for needle in ["cpu ·", "gpu0 ·", "proc ·", "mem ·"] {
+        for needle in ["cpu ·", "gpu0 ·", "npu usage", "proc ·", "mem ·"] {
             assert!(text.contains(needle), "missing box: {}", needle);
         }
         // menu bar furniture
         assert!(text.contains("strix-halo"), "hostname missing from the menu bar");
         assert!(text.contains("BAT0"), "battery missing from the menu bar");
         assert!(text.contains("1000ms"), "interval missing from the menu bar");
+    }
+
+    #[test]
+    fn memory_used_bar_switches_from_green_to_red() {
+        let (mut snap, history) = snapshot_and_history();
+        snap.mem.used = snap.mem.total / 4;
+        let buf = render_buffer(Tab::Dash, MemView::Unified, &snap, &history);
+        let (x, y) = row_of(&buf, "Used:").expect("Used row");
+        let cell = buf.cell((x + 9, y)).expect("first used cell");
+        assert_eq!(cell.fg, crate::theme::GOOD, "25% used should be green");
+
+        snap.mem.used = snap.mem.total * 95 / 100;
+        let buf = render_buffer(Tab::Dash, MemView::Unified, &snap, &history);
+        let (x, y) = row_of(&buf, "Used:").expect("Used row");
+        let cell = buf.cell((x + 9, y)).expect("first used cell");
+        assert_eq!(cell.fg, crate::theme::BAD, "95% used should be red");
     }
 
     #[test]
@@ -877,6 +944,54 @@ mod tests {
         assert!(text.contains("GTT"), "GTT gauge missing");
         assert!(text.contains("compute"), "engine list missing");
         assert!(text.contains("2.90 GHz"), "clock range missing");
+    }
+
+    #[test]
+    fn npu_tab_shows_array_columns_and_contexts() {
+        let text = render_tab(Tab::Npu, MemView::Unified);
+        assert!(text.contains("RyzenAI-npu5"), "npu name missing");
+        assert!(text.contains("npu usage"), "usage title missing");
+        assert!(text.contains("COLS"), "column meter missing");
+        assert!(text.contains("contexts ·"), "context box missing");
+        assert!(text.contains("llama-server"), "context row missing");
+        assert!(text.contains("58 / 58"), "TOPS readout missing");
+        assert!(text.contains("C7"), "column strip truncated");
+        assert!(text.contains("NPU"), "tab label missing");
+    }
+
+    #[test]
+    fn npu_without_pmf_falls_back_to_active_columns() {
+        let mut backend = SimBackend::new();
+        let mut snap = backend.sample();
+        let npu = snap.npu.as_mut().expect("simulated NPU");
+        npu.sensors_ok = false;
+        npu.busy = None;
+        npu.power_w = None;
+        npu.col_busy.clear();
+        npu.cols_used = Some(4);
+        npu.cols_bitmap = Some(0b1111);
+        npu.error = Some("sensors: No such device (os error 19)".to_string());
+        let history = History::new(8, 32);
+        let mut app = App::new(&crate::args::Args::default());
+        app.tab = Tab::Npu;
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 140,
+            height: 40,
+        };
+        let mut buf = Buffer::empty(area);
+        render(area, &mut buf, &app, &snap, &history, &Theme::new(false, true));
+        let text = buffer_text(&buf);
+        assert!(text.contains("npu active cols"), "no column fallback title");
+        assert!(text.contains("ACT"), "no active-columns meter");
+        assert!(text.contains("sensors off"), "no PMF hint");
+    }
+
+    #[test]
+    fn npu_tab_is_reachable_by_name_and_number() {
+        assert_eq!(Tab::from_name("npu"), Some(Tab::Npu));
+        assert_eq!(Tab::from_name("7"), Some(Tab::Npu));
     }
 
     #[test]

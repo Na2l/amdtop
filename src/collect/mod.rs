@@ -11,6 +11,7 @@ pub mod gpu;
 pub mod linux;
 pub mod mem;
 pub mod net;
+pub mod npu;
 pub mod procs;
 pub mod system;
 pub mod ttm;
@@ -83,6 +84,9 @@ pub struct History {
     pub cpu_temp: Ring,
     pub cpu_freq: Ring,
     pub gpu: Ring,
+    pub npu: Ring,
+    pub npu_power: Ring,
+    pub npu_clock: Ring,
     pub gpu_mem_busy: Ring,
     pub gpu_temp: Ring,
     pub gpu_power: Ring,
@@ -107,6 +111,9 @@ impl History {
             cpu_temp: Ring::new(cap),
             cpu_freq: Ring::new(cap),
             gpu: Ring::new(cap),
+            npu: Ring::new(cap),
+            npu_power: Ring::new(cap),
+            npu_clock: Ring::new(cap),
             gpu_mem_busy: Ring::new(cap),
             gpu_temp: Ring::new(cap),
             gpu_power: Ring::new(cap),
@@ -156,6 +163,15 @@ impl History {
             }
             self.vram.push(gpu.vram_used.unwrap_or(0) as f64);
             self.gtt.push(gpu.gtt_used.unwrap_or(0) as f64);
+        }
+        if let Some(npu) = &snap.npu {
+            self.npu.push(npu.busy.or_else(|| npu.cols_ratio()).unwrap_or(0.0));
+            if let Some(power) = npu.power_w {
+                self.npu_power.push(power);
+            }
+            if let Some(clock) = npu.npu_mhz {
+                self.npu_clock.push(clock);
+            }
         }
         self.mem_used.push(snap.mem.used as f64);
         self.swap_used.push(snap.mem.swap_used as f64);
@@ -257,6 +273,137 @@ impl GpuSample {
 
     pub fn gtt_ratio(&self) -> Option<f64> {
         crate::util::ratio(self.gtt_used, self.gtt_total)
+    }
+}
+
+/// One AIE tile group (`core`, `mem` or `shim`) from `QUERY_AIE_METADATA`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NpuTile {
+    pub rows: u16,
+    pub row_start: u16,
+    pub dma_channels: u16,
+    pub locks: u16,
+    pub events: u16,
+}
+
+impl NpuTile {
+    pub fn describe(&self) -> String {
+        format!(
+            "{} rows @{} · {} dma · {} locks",
+            self.rows, self.row_start, self.dma_channels, self.locks
+        )
+    }
+}
+
+/// One NPU hardware context (a process's queue on the array).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NpuContext {
+    /// Owning process; 0 for kernel/internal contexts.
+    pub pid: i64,
+    pub ctx_id: u32,
+    pub start_col: u32,
+    pub num_col: u32,
+    /// `0` idle, `1` active (driver `AMDXDNA_HWCTX_STATE_*`).
+    pub state: u32,
+    /// Device heap resident for this context, in bytes (system RAM).
+    pub heap: u64,
+    pub submissions: u64,
+    pub completions: u64,
+    pub errors: u64,
+    pub preemptions: u64,
+    pub migrations: u64,
+    pub suspensions: u64,
+    pub fps: u32,
+    pub gops: u32,
+    pub dma_bandwidth: u32,
+    pub latency: u32,
+    pub frame_exec_time: u32,
+}
+
+impl NpuContext {
+    pub fn active(&self) -> bool {
+        self.state == 1
+    }
+
+    pub fn column_span(&self) -> String {
+        if self.num_col <= 1 {
+            format!("{}", self.start_col)
+        } else {
+            format!("{}-{}", self.start_col, self.start_col + self.num_col - 1)
+        }
+    }
+}
+
+/// NPU side of a snapshot (`amdxdna` + the XDNA query ioctl).
+#[derive(Debug, Clone, Default)]
+pub struct NpuSample {
+    /// `vbnv`, e.g. `RyzenAI-npu5`.
+    pub name: String,
+    pub bdf: String,
+    pub driver: String,
+    pub node: String,
+    /// Firmware version as the driver reports it, e.g. `1.1.2.65`.
+    pub fw: String,
+    /// A device was found (it may still be unopenable).
+    pub available: bool,
+    /// First query/setup error, if any. The rest of the sample may still be valid.
+    pub error: Option<String>,
+
+    pub cols: Option<u32>,
+    pub rows: Option<u32>,
+    pub col_size: Option<u32>,
+    pub aie_version: Option<(u32, u32)>,
+    pub tile_core: Option<NpuTile>,
+    pub tile_mem: Option<NpuTile>,
+    pub tile_shim: Option<NpuTile>,
+
+    pub npu_mhz: Option<f64>,
+    pub h_mhz: Option<f64>,
+    pub npu_max_mhz: Option<f64>,
+    pub tops_max: Option<u32>,
+    pub tops_curr: Option<u32>,
+    pub task_max: Option<u32>,
+    pub task_curr: Option<u32>,
+    pub power_w: Option<f64>,
+    pub power_mode: Option<String>,
+
+    /// Per-column utilization, 0.0..=1.0. Empty when the PMF sensor query is
+    /// unavailable (NPU metrics disabled in the kernel).
+    pub col_busy: Vec<f64>,
+    /// Hottest column, the headline "NPU busy" number.
+    pub busy: Option<f64>,
+    /// Columns currently assigned to a hardware context (bitmap popcount).
+    pub cols_used: Option<u32>,
+    /// Raw column bitmap behind `cols_used`.
+    pub cols_bitmap: Option<u32>,
+    pub sensors_ok: bool,
+    pub contexts: Vec<NpuContext>,
+}
+
+impl NpuSample {
+    pub fn label(&self) -> &str {
+        if self.name.is_empty() {
+            "AMD NPU"
+        } else {
+            &self.name
+        }
+    }
+
+    pub fn used_cols(&self) -> u32 {
+        self.cols_used.unwrap_or(0)
+    }
+
+    pub fn cols_ratio(&self) -> Option<f64> {
+        match (self.cols_used, self.cols) {
+            (Some(used), Some(total)) if total > 0 => {
+                Some(crate::util::clamp(used as f64 / total as f64, 0.0, 1.0))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn top_clock(&self) -> Option<f64> {
+        self.npu_mhz.or(self.h_mhz)
     }
 }
 
@@ -381,6 +528,7 @@ pub struct Snapshot {
     pub wall: f64,
     pub cpu: CpuSample,
     pub gpu: Option<GpuSample>,
+    pub npu: Option<NpuSample>,
     pub mem: MemSample,
     pub ttm: TtmSample,
     pub procs: Vec<ProcInfo>,

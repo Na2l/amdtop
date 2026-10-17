@@ -46,6 +46,34 @@ pub fn meter(
     theme: &Theme,
     kind: Gradient,
 ) {
+    meter_with(area, buf, ratio, label, right, theme, &|position| {
+        theme.grad(kind, position)
+    });
+}
+
+/// A meter whose fill and value use one fixed colour (thresholds, not a ramp).
+pub fn meter_solid(
+    area: Rect,
+    buf: &mut Buffer,
+    ratio: Option<f64>,
+    label: &str,
+    right: &str,
+    theme: &Theme,
+    color: Color,
+) {
+    let color = if theme.color { color } else { Color::Reset };
+    meter_with(area, buf, ratio, label, right, theme, &|_| color);
+}
+
+fn meter_with(
+    area: Rect,
+    buf: &mut Buffer,
+    ratio: Option<f64>,
+    label: &str,
+    right: &str,
+    theme: &Theme,
+    color_at: &dyn Fn(f64) -> Color,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -74,7 +102,7 @@ pub fn meter(
             0.0
         };
         if index < filled {
-            put_cell(buf, x + index as u16, y, theme.full(), theme.grad(kind, position));
+            put_cell(buf, x + index as u16, y, theme.full(), color_at(position));
         } else {
             put_cell(buf, x + index as u16, y, theme.empty(), theme.meter_bg());
         }
@@ -83,7 +111,7 @@ pub fn meter(
     if start < limit {
         let text = crate::util::fit_right(right, (limit - start) as usize);
         // btop paints the percentage with the same gradient as the meter.
-        put_text(buf, start, y, &text, theme.grad(kind, ratio), limit);
+        put_text(buf, start, y, &text, color_at(ratio), limit);
     }
 }
 

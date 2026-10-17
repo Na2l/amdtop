@@ -6,8 +6,8 @@ one pool of LPDDR5X.
 
 Plain `btop`/`htop` cannot answer the question that matters on these machines:
 *how much of my RAM is actually pinned for the GPU, and which process is holding
-it?* `amdtop` shows CPU load, GPU load, VRAM, GTT and TTM side by side, plus a
-`top`-style process list with per-process GPU memory.
+it?* `amdtop` shows CPU load, GPU load, NPU load, VRAM, GTT and TTM side by side,
+plus a `top`-style process list with per-process GPU memory.
 
 Single static-ish Rust binary, no runtime dependencies, no Python.
 
@@ -37,6 +37,9 @@ Single static-ish Rust binary, no runtime dependencies, no Python.
 └─────────────────────────┘└──────────────────┘└───────────────────────────────────────────────┘
 ```
 
+*(The dashboard also has a full-width NPU row directly under the GPU row;
+see `docs/dash.svg` below. The block above predates it.)*
+
 ### Layout and colours
 
 Top to bottom, the dashboard mirrors btop, with two side-by-side panels per row:
@@ -46,14 +49,25 @@ Top to bottom, the dashboard mirrors btop, with two side-by-side panels per row:
    compact cell (`C00 ▆▅▅▅ 58.4%`) with its own history.
 2. **GPU row.** Left panel: the **GPU usage histogram**. Right panel:
    `GPU` / `PWR` / `VRAM` / `GTT` bars plus the sensor line.
+3. **NPU row**, directly under the GPU: the **NPU usage histogram** and the
+   `C0`–`C7` column strip on the left; `NPU` / `PWR` / `COLS` / `CLK` on the
+   right. Without the PMF sensor it shows **ACT** (columns assigned to a
+   context) instead of utilization. The row is omitted on terminals shorter
+   than 30 rows.
+4. **Bottom.** **Memory** on the left with **disks** and **network** side by side
+   beneath it, and the **process list** filling the right-hand side.
 
-Both rows therefore read *histogram first, readings to its right*.
+Every row reads *histogram first, readings to its right*.
 
 The usage histograms are **mirrored**: the baseline runs through the vertical
 middle and load grows symmetrically above *and* below it, the way btop draws its
 graphs. Press `M` to switch them back to growing up from the bottom.
-3. **Bottom.** **Memory** on the left with **disks** and **network** side by side
-   beneath it, and the **process list** filling the right-hand side.
+
+The **NPU tab** (`7`) is the detailed view: array shape, AIE version, firmware,
+TOPS, power mode and the live hardware contexts below (PID, columns, heap,
+submissions, errors).
+
+![npu](docs/npu.svg)
 
 Idle graphs still draw their baseline (in btop's `graph_text` colour) so the
 histograms are always visible, even at 0%.
@@ -79,10 +93,14 @@ so the two look alike side by side:
 | process CPU% | `process_*` | `#80d0a3` → `#dcd179` → `#d45454` |
 | selection | `selected_bg/fg` | `#6a2f2f` / `#eeeeee` |
 
-Every metric keeps its own gradient — **used is red, available yellow, cached
-cyan, free green, CPU green→red, GTT blue** — and the numbers next to each bar
-inherit the same gradient, exactly as btop does. CPUs use the CPU gradient for
-both the per-core histograms and their percentages.
+Most metrics keep their btop gradient — CPU green→red, VRAM amber, GTT blue,
+cached cyan — and the numbers next to each bar inherit it. System memory is
+the exception: `Used`, `Avail` and `Free` use fixed pressure steps instead of
+a per-bar ramp. Used is green while there is room, yellow at 50 %, orange near
+the edge and red at 90 %+; free/available run the other way, and are red once
+free drops below 10 % of RAM. `Total`, `GTT` and `Cached` keep their own
+colours. CPUs use the CPU gradient for both the per-core histograms and their
+percentages.
 
 ![dash](docs/dash.svg)
 
@@ -154,7 +172,7 @@ sudo ./dist/amdtop         # + full TTM debugfs view
 |---|---|
 | `q` / `Ctrl-C` | quit |
 | `?` / `h` | help |
-| `Tab` or `1`–`6` | Dashboard / CPU / GPU / MEM / PROC / IO |
+| `Tab` or `1`–`7` | Dashboard / CPU / GPU / MEM / PROC / IO / NPU |
 | `m` | cycle memory views: CPU RAM → GPU → TTM → Unified |
 | `space` | pause sampling |
 | `+` / `-` | sampling interval |
@@ -229,6 +247,8 @@ Everything is read from standard kernel interfaces — no `sudo`, no daemons, no
 | Disk I/O | `/proc/diskstats`, `/sys/block/*/device/model` |
 | Network | `/proc/net/dev` (virtual links filtered out) |
 | Battery, hostname, clock | `/sys/class/power_supply/BAT*`, `/proc/sys/kernel/hostname`, `localtime_r` |
+| NPU identity, firmware | `/sys/class/accel/accel*/device/{uevent,vbnv,fw_version}` |
+| NPU array, clocks, TOPS, contexts, sensors | `DRM_IOCTL_AMDXDNA_GET_INFO` on `/dev/accel/accelN` (`AIE_METADATA`, `CLOCK_METADATA`, `RESOURCE_INFO`, `HW_CONTEXTS`, `SENSORS`) |
 
 ### Notes on accuracy
 
@@ -242,11 +262,20 @@ Everything is read from standard kernel interfaces — no `sudo`, no daemons, no
 * `mem_busy_percent` is not exported by all kernels; it shows `-` when absent.
 * The per-process GPU scan is throttled (default 2 s) because it walks
   `/proc/*/fd`; the footer shows the scan age and duration.
+* NPU utilization and power come from the kernel's AMD PMF NPU metrics. When
+  the PMF ACPI device is not exposed by the firmware (`ENODEV`, which is what
+  this Strix Halo board reports even as root) or the kernel was built without
+  `CONFIG_AMD_PMF`, the NPU tab falls back to active columns / array occupancy
+  and says so; metadata, clocks, TOPS and contexts still work.
+* The NPU has no hwmon and no dedicated VRAM: it allocates from system RAM.
+  Per-context `heap_usage` is the closest thing to "NPU memory", and there is
+  no NPU temperature sensor to show.
 
 ## Verified on
 
 Real hardware, `AMD Ryzen AI MAX+ 395 w/ Radeon 8060S`, kernel 7.0.0, Ubuntu
-26.04: VRAM/GTT/busy/clocks/temps/power all match the raw `sysfs` values exactly
+26.04: the NPU is a `RyzenAI-npu5` (`1022:17f0`, `amdxdna`, fw `1.1.2.65`)
+with an 8x6 array and 58 TOPS. VRAM/GTT/busy/clocks/temps/power all match the raw `sysfs` values exactly
 (`gtt_total 120259084288`, `ttm.pages_limit × 4096 = 120259084288`). Disks
 (`nvme0n1` Lexar SSD ARES 2TB, `sda` PSSD T7) and links (`eno1`, `wlp195s0`) are
 detected with container/virtual interfaces filtered out.

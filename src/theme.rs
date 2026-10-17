@@ -31,6 +31,8 @@ pub const PROC_BOX: Color = Color::Rgb(0x80, 0x52, 0x52);
 pub const GPU_BOX: Color = Color::Rgb(0x7b, 0x40, 0x7b);
 /// Disks share the memory box colour in btop.
 pub const DISK_BOX: Color = MEM_BOX;
+/// NPU: a teal accent, distinct from the GPU box.
+pub const NPU_BOX: Color = Color::Rgb(0x4b, 0x78, 0x86);
 
 //* Named accents used across the panels (all from the table above). *//
 pub const TEXT: Color = MAIN_FG;
@@ -40,11 +42,46 @@ pub const ACCENT: Color = HI_FG;
 pub const GOOD: Color = Color::Rgb(0xb5, 0xe6, 0x85);
 pub const WARN: Color = Color::Rgb(0xff, 0xb8, 0x14);
 pub const BAD: Color = Color::Rgb(0xff, 0x47, 0x69);
+/// Amber between `WARN` and `BAD`, for the memory pressure steps.
+pub const ORANGE: Color = Color::Rgb(0xff, 0x8c, 0x1a);
 pub const GPU_ACCENT: Color = GPU_BOX;
 pub const GTT_ACCENT: Color = Color::Rgb(0x74, 0xe6, 0xfc);
 pub const VRAM_ACCENT: Color = Color::Rgb(0xff, 0xd7, 0x7a);
 pub const CPU_ACCENT: Color = Color::Rgb(0x77, 0xca, 0x9b);
 pub const IO_WRITE: Color = Color::Rgb(0x7d, 0x41, 0x80);
+
+/// Colour for a "used" memory bar: green while there is room, red as it fills.
+///
+/// The steps mirror [`memory_free_color`] exactly: below 50% green, 50–70%
+/// yellow, 70–90% orange, 90%+ red.
+pub fn memory_used_color(ratio: f64) -> Color {
+    let ratio = crate::util::clamp(ratio, 0.0, 1.0);
+    if ratio >= 0.9 {
+        BAD
+    } else if ratio >= 0.7 {
+        ORANGE
+    } else if ratio >= 0.5 {
+        WARN
+    } else {
+        GOOD
+    }
+}
+
+/// Colour for an "available"/"free" memory bar: red when nearly exhausted.
+///
+/// Below 10% red, 10–30% orange, 30–50% yellow, above 50% green.
+pub fn memory_free_color(ratio: f64) -> Color {
+    let ratio = crate::util::clamp(ratio, 0.0, 1.0);
+    if ratio < 0.1 {
+        BAD
+    } else if ratio < 0.3 {
+        ORANGE
+    } else if ratio <= 0.5 {
+        WARN
+    } else {
+        GOOD
+    }
+}
 
 /// Which btop gradient a value should be painted with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,6 +317,19 @@ mod tests {
         let three_quarters = gradient_color(Gradient::Used, 0.75);
         assert_ne!(quarter, three_quarters);
         assert_ne!(quarter, gradient_color(Gradient::Used, 0.0));
+    }
+
+    #[test]
+    fn memory_colors_step_at_the_pressure_thresholds() {
+        assert_eq!(memory_used_color(0.09), GOOD);
+        assert_eq!(memory_used_color(0.5), WARN);
+        assert_eq!(memory_used_color(0.7), ORANGE);
+        assert_eq!(memory_used_color(0.9), BAD);
+
+        assert_eq!(memory_free_color(0.9), GOOD);
+        assert_eq!(memory_free_color(0.5), WARN);
+        assert_eq!(memory_free_color(0.2), ORANGE);
+        assert_eq!(memory_free_color(0.09), BAD);
     }
 
     #[test]

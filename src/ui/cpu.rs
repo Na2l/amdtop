@@ -50,7 +50,7 @@ pub fn btop_box(
     // Head rows: total meter, uptime, load average and process count. The grid is
     // sized first so the head takes exactly the rows that are left over.
     let cores = snap.cpu.per_core.len();
-    let cell_min: u16 = 18;
+    let cell_min: u16 = 16;
     let columns = ((inner.width / cell_min).max(1) as usize).min(cores.max(1));
     let core_rows_needed = cores.div_ceil(columns);
     let head_height = (inner.height as usize)

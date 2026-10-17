@@ -123,6 +123,41 @@ fn debug<B: Backend>(mut backend: B, theme: &Theme) -> Result<(), Box<dyn std::e
         }
         None => println!("  {:<14} none", "gpu"),
     }
+    match &snapshot.npu {
+        Some(npu) => {
+            println!(
+                "  {:<14} {}  {}x{} cols  busy {}  power {}",
+                "npu",
+                npu.label(),
+                npu.cols.unwrap_or(0),
+                npu.rows.unwrap_or(0),
+                util::human_pct(npu.busy),
+                npu.power_w
+                    .map(|power| format!("{:.1} W", power))
+                    .unwrap_or_else(|| "-".to_string())
+            );
+            println!(
+                "  {:<14} tops {}/{}  clock {}  fw {}  {}",
+                "npu array",
+                npu.tops_curr.unwrap_or(0),
+                npu.tops_max.unwrap_or(0),
+                util::human_freq(npu.npu_mhz),
+                npu.fw,
+                npu.bdf
+            );
+            println!(
+                "  {:<14} {} contexts, {} active{}",
+                "npu contexts",
+                npu.contexts.len(),
+                npu.contexts.iter().filter(|context| context.active()).count(),
+                npu.error
+                    .as_ref()
+                    .map(|error| format!("  ({})", error))
+                    .unwrap_or_default()
+            );
+        }
+        None => println!("  {:<14} none", "npu"),
+    }
     println!(
         "  {:<14} used {} / {} (gtt {} excluded: {})",
         "memory",

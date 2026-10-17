@@ -70,25 +70,28 @@ pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, t
             util::ratio(Some(*value), Some(*total))
         };
         // The right-hand text is drawn by the meter so it inherits the
-        // metric's gradient (used=red, cached=cyan, free=green, ...).
-        widgets::meter(
-            Rect {
-                x: inner.x + label_width,
-                y,
-                width: bar_width + 1 + value_width + pct_width,
-                height: 1,
-            },
-            buf,
-            ratio,
-            "",
-            &format!(
-                "{:>10} {:>3.0}%",
-                util::human_bytes(*value),
-                ratio.unwrap_or(0.0) * 100.0
-            ),
-            theme,
-            *kind,
+        // bar's colour. Used/available/free use the fixed pressure steps;
+        // GTT and cache keep their metric colours.
+        let color = match *label {
+            "Used:" => Some(crate::theme::memory_used_color(ratio.unwrap_or(0.0))),
+            "Avail:" | "Free:" => Some(crate::theme::memory_free_color(ratio.unwrap_or(0.0))),
+            _ => None,
+        };
+        let right = format!(
+            "{:>10} {:>3.0}%",
+            util::human_bytes(*value),
+            ratio.unwrap_or(0.0) * 100.0
         );
+        let area = Rect {
+            x: inner.x + label_width,
+            y,
+            width: bar_width + 1 + value_width + pct_width,
+            height: 1,
+        };
+        match color {
+            Some(color) => widgets::meter_solid(area, buf, ratio, "", &right, theme, color),
+            None => widgets::meter(area, buf, ratio, "", &right, theme, *kind),
+        }
     }
     if graph_height >= 1 && inner.height > 1 {
         let graph = Rect {
@@ -142,20 +145,23 @@ fn view_cpu(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, theme
         if y >= left.bottom() {
             break;
         }
-        widgets::meter(
-            Rect {
-                x: left.x,
-                y,
-                width: left.width,
-                height: 1,
-            },
-            buf,
-            util::ratio(Some(*value), Some(*total)),
-            label,
-            &format!("{} / {}", util::human_bytes(*value), util::human_bytes(*total)),
-            theme,
-            *kind,
-        );
+        let ratio = util::ratio(Some(*value), Some(*total));
+        let color = match *label {
+            "used" | "cpu-only" => Some(crate::theme::memory_used_color(ratio.unwrap_or(0.0))),
+            "free" | "available" => Some(crate::theme::memory_free_color(ratio.unwrap_or(0.0))),
+            _ => None,
+        };
+        let right = format!("{} / {}", util::human_bytes(*value), util::human_bytes(*total));
+        let area = Rect {
+            x: left.x,
+            y,
+            width: left.width,
+            height: 1,
+        };
+        match color {
+            Some(color) => widgets::meter_solid(area, buf, ratio, label, &right, theme, color),
+            None => widgets::meter(area, buf, ratio, label, &right, theme, *kind),
+        }
     }
     if left.height as usize > rows.len() + 1 {
         let note = Rect {

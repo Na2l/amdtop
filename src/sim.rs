@@ -11,7 +11,8 @@ use crate::collect::disks::DiskStats;
 use crate::collect::net::NetStats;
 use crate::collect::system::BatteryInfo;
 use crate::collect::{
-    Backend, CpuSample, GpuSample, ManStats, MemSample, Snapshot, TtmPool, TtmSample,
+    Backend, CpuSample, GpuSample, ManStats, MemSample, NpuContext, NpuSample, NpuTile, Snapshot,
+    TtmPool, TtmSample,
 };
 
 const GIB: u64 = 1024 * 1024 * 1024;
@@ -80,6 +81,7 @@ pub struct SimBackend {
     core_load: Vec<f64>,
     gtt_used: u64,
     vram_used: u64,
+    npu_busy: f64,
     gpu_busy: f64,
     power: f64,
     mem_used: u64,
@@ -97,6 +99,7 @@ impl SimBackend {
             core_load: vec![0.05; 32],
             gtt_used: 12 * GIB,
             vram_used: 420 * MIB,
+            npu_busy: 0.05,
             gpu_busy: 0.12,
             power: 18.0,
             mem_used: 34 * GIB,
@@ -210,6 +213,142 @@ impl Backend for SimBackend {
             fan_rpm: Some(1200.0 + self.gpu_busy * 1600.0),
             fan_percent: Some(crate::util::clamp(0.2 + self.gpu_busy * 0.6, 0.0, 1.0)),
             extra_mem: vec![("cpu_access_total".to_string(), Some(0), Some(0))],
+        };
+
+        // NPU: a workload that ramps up and down independently of the GPU. The
+        // column count and sensor set mirror a RyzenAI-npu5 (8 columns).
+        let npu_target = 0.12
+            + 0.88
+                * ((self.tick as f64 / 9.0).sin() * 0.5 + 0.5).powi(3)
+                * if self.tick % 37 < 24 { 1.0 } else { 0.35 };
+        self.npu_busy =
+            crate::util::clamp(self.npu_busy * 0.55 + npu_target * 0.45, 0.0, 1.0);
+        let npu_cols = if self.npu_busy > 0.55 {
+            6
+        } else if self.npu_busy > 0.2 {
+            4
+        } else {
+            0
+        };
+        let mut col_busy = vec![0.0; 8];
+        for (index, value) in col_busy.iter_mut().enumerate().take(npu_cols) {
+            let skew = 0.75 + 0.25 * (((index * 7 + 3) % 5) as f64 / 4.0);
+            *value = crate::util::clamp(self.npu_busy * skew, 0.0, 1.0);
+        }
+        let npu_power = 1.8 + self.npu_busy * 17.0;
+        let npu_clock = 1267.0 + self.npu_busy * (1800.0 - 1267.0);
+        let contexts = if npu_cols == 6 {
+            vec![
+                NpuContext {
+                    pid: 2201,
+                    ctx_id: 3,
+                    start_col: 0,
+                    num_col: 4,
+                    state: 1,
+                    heap: 640 * MIB,
+                    submissions: 9_000 + self.tick * 41,
+                    completions: 8_990 + self.tick * 41,
+                    errors: 0,
+                    preemptions: 2,
+                    migrations: 0,
+                    suspensions: 1,
+                    fps: 38,
+                    gops: 21,
+                    dma_bandwidth: 1_200,
+                    latency: 420,
+                    frame_exec_time: 26,
+                },
+                NpuContext {
+                    pid: 2455,
+                    ctx_id: 7,
+                    start_col: 4,
+                    num_col: 2,
+                    state: 1,
+                    heap: 288 * MIB,
+                    submissions: 3_200 + self.tick * 12,
+                    completions: 3_190 + self.tick * 12,
+                    errors: 0,
+                    preemptions: 0,
+                    migrations: 1,
+                    suspensions: 0,
+                    fps: 17,
+                    gops: 9,
+                    dma_bandwidth: 480,
+                    latency: 700,
+                    frame_exec_time: 58,
+                },
+            ]
+        } else if npu_cols == 4 {
+            vec![NpuContext {
+                pid: 2201,
+                ctx_id: 3,
+                start_col: 0,
+                num_col: 4,
+                state: 1,
+                heap: 512 * MIB,
+                submissions: 4_000 + self.tick * 18,
+                completions: 3_990 + self.tick * 18,
+                errors: 0,
+                preemptions: 1,
+                migrations: 0,
+                suspensions: 0,
+                fps: 24,
+                gops: 13,
+                dma_bandwidth: 900,
+                latency: 510,
+                frame_exec_time: 41,
+            }]
+        } else {
+            Vec::new()
+        };
+        let npu = NpuSample {
+            name: "RyzenAI-npu5".to_string(),
+            bdf: "0000:c6:00.1".to_string(),
+            driver: "amdxdna".to_string(),
+            node: "/dev/accel/accel0".to_string(),
+            fw: "1.1.2.65".to_string(),
+            available: true,
+            error: None,
+            cols: Some(8),
+            rows: Some(6),
+            col_size: Some(504),
+            aie_version: Some((1, 1)),
+            tile_core: Some(NpuTile {
+                rows: 4,
+                row_start: 2,
+                dma_channels: 2,
+                locks: 16,
+                events: 4,
+            }),
+            tile_mem: Some(NpuTile {
+                rows: 1,
+                row_start: 1,
+                dma_channels: 6,
+                locks: 64,
+                events: 6,
+            }),
+            tile_shim: Some(NpuTile {
+                rows: 1,
+                row_start: 0,
+                dma_channels: 2,
+                locks: 16,
+                events: 4,
+            }),
+            npu_mhz: Some(npu_clock),
+            h_mhz: Some(1800.0),
+            npu_max_mhz: Some(1800.0),
+            tops_max: Some(58),
+            tops_curr: Some(58),
+            task_max: Some(16),
+            task_curr: Some(contexts.len() as u32),
+            power_w: Some(npu_power),
+            power_mode: Some("default".to_string()),
+            col_busy,
+            busy: Some(self.npu_busy),
+            cols_used: Some(npu_cols as u32),
+            cols_bitmap: Some(if npu_cols == 0 { 0 } else { (1u32 << npu_cols) - 1 }),
+            sensors_ok: true,
+            contexts,
         };
 
         let cpu = CpuSample {
@@ -365,6 +504,7 @@ impl Backend for SimBackend {
             hostname: "strix-halo".to_string(),
             cpu,
             gpu: Some(gpu),
+            npu: Some(npu),
             mem,
             ttm,
             procs,
@@ -380,6 +520,7 @@ impl Backend for SimBackend {
             ("memory".to_string(), "126 GiB unified LPDDR5X".to_string()),
             ("gpu".to_string(), "Radeon 8060S, 512 MiB VRAM carveout".to_string()),
             ("gtt".to_string(), "64 GiB limit".to_string()),
+            ("npu".to_string(), "RyzenAI-npu5, 8 columns, 58 TOPS (simulated)".to_string()),
         ]
     }
 

@@ -1,6 +1,6 @@
 //! One-shot JSON output (`--json`), hand rolled to avoid a serde dependency.
 
-use crate::collect::{ProcInfo, Snapshot};
+use crate::collect::{NpuSample, ProcInfo, Snapshot};
 
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
@@ -67,6 +67,93 @@ fn process_json(proc: &ProcInfo) -> String {
         proc.gpu_sys,
         proc.gpu_clients
     )
+}
+
+fn opt_u32(value: Option<u32>) -> String {
+    match value {
+        Some(value) => value.to_string(),
+        None => "null".to_string(),
+    }
+}
+
+fn npu_json(npu: &NpuSample) -> String {
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str(&format!("    \"name\": \"{}\",\n", escape(&npu.name)));
+    out.push_str(&format!("    \"bdf\": \"{}\",\n", escape(&npu.bdf)));
+    out.push_str(&format!("    \"driver\": \"{}\",\n", escape(&npu.driver)));
+    out.push_str(&format!("    \"node\": \"{}\",\n", escape(&npu.node)));
+    out.push_str(&format!("    \"firmware\": \"{}\",\n", escape(&npu.fw)));
+    out.push_str(&format!("    \"available\": {},\n", npu.available));
+    out.push_str(&format!(
+        "    \"error\": {},\n",
+        npu.error
+            .as_ref()
+            .map(|error| format!("\"{}\"", escape(error)))
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!("    \"cols\": {},\n", opt_u32(npu.cols)));
+    out.push_str(&format!("    \"rows\": {},\n", opt_u32(npu.rows)));
+    out.push_str(&format!("    \"col_size\": {},\n", opt_u32(npu.col_size)));
+    out.push_str(&format!(
+        "    \"aie_version\": {},\n",
+        npu.aie_version
+            .map(|(major, minor)| format!("\"{}.{}\"", major, minor))
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!("    \"npu_mhz\": {},\n", opt_number(npu.npu_mhz)));
+    out.push_str(&format!("    \"h_mhz\": {},\n", opt_number(npu.h_mhz)));
+    out.push_str(&format!("    \"npu_max_mhz\": {},\n", opt_number(npu.npu_max_mhz)));
+    out.push_str(&format!("    \"tops_curr\": {},\n", opt_u32(npu.tops_curr)));
+    out.push_str(&format!("    \"tops_max\": {},\n", opt_u32(npu.tops_max)));
+    out.push_str(&format!("    \"task_curr\": {},\n", opt_u32(npu.task_curr)));
+    out.push_str(&format!("    \"task_max\": {},\n", opt_u32(npu.task_max)));
+    out.push_str(&format!("    \"power_w\": {},\n", opt_number(npu.power_w)));
+    out.push_str(&format!(
+        "    \"power_mode\": {},\n",
+        npu.power_mode
+            .as_ref()
+            .map(|mode| format!("\"{}\"", escape(mode)))
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    out.push_str(&format!("    \"busy\": {},\n", opt_number(npu.busy)));
+    out.push_str(&format!("    \"cols_used\": {},\n", opt_u32(npu.cols_used)));
+    out.push_str(&format!("    \"cols_bitmap\": {},\n", opt_u32(npu.cols_bitmap)));
+    out.push_str(&format!("    \"sensors_ok\": {},\n", npu.sensors_ok));
+    let columns: Vec<String> = npu.col_busy.iter().map(|value| number(*value)).collect();
+    out.push_str(&format!("    \"columns\": [{}],\n", columns.join(", ")));
+    let contexts: Vec<String> = npu
+        .contexts
+        .iter()
+        .map(|context| {
+            format!(
+                "{{\"pid\": {}, \"context_id\": {}, \"start_col\": {}, \"num_col\": {}, \
+\"state\": {}, \"heap\": {}, \"submissions\": {}, \"completions\": {}, \"errors\": {}, \
+\"preemptions\": {}, \"migrations\": {}, \"suspensions\": {}, \"fps\": {}, \"gops\": {}, \
+\"dma_bandwidth\": {}, \"latency\": {}, \"frame_exec_time\": {}}}",
+                context.pid,
+                context.ctx_id,
+                context.start_col,
+                context.num_col,
+                context.state,
+                context.heap,
+                context.submissions,
+                context.completions,
+                context.errors,
+                context.preemptions,
+                context.migrations,
+                context.suspensions,
+                context.fps,
+                context.gops,
+                context.dma_bandwidth,
+                context.latency,
+                context.frame_exec_time
+            )
+        })
+        .collect();
+    out.push_str(&format!("    \"contexts\": [{}]\n", contexts.join(", ")));
+    out.push_str("  }");
+    out
 }
 
 /// Serialise a snapshot, including the process table (capped at `max_procs`).
@@ -143,6 +230,15 @@ pub fn snapshot(snap: &Snapshot, max_procs: usize) -> String {
                 .collect();
             out.push_str(&format!("    \"temps\": {{{}}}\n", temps.join(", ")));
             out.push_str("  },\n");
+        }
+    }
+
+    out.push_str("  \"npu\": ");
+    match &snap.npu {
+        None => out.push_str("null,\n"),
+        Some(npu) => {
+            out.push_str(&npu_json(npu));
+            out.push_str(",\n");
         }
     }
 

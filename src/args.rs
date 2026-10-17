@@ -51,7 +51,7 @@ impl Default for Args {
 }
 
 pub const HELP: &str = "\
-amdtop - btop-style monitor for AMD Strix Halo (CPU + GPU + VRAM/GTT/TTM + processes)
+amdtop - btop-style monitor for AMD Strix Halo (CPU + GPU + NPU + VRAM/GTT/TTM + processes)
 
 USAGE:
     amdtop [OPTIONS]
@@ -60,7 +60,7 @@ OPTIONS:
     -d, --demo              run against a simulated Strix Halo (no AMD GPU needed)
     -i, --interval <ms>     refresh interval in milliseconds [default: 1000]
         --history <n>       samples kept for graphs [default: 600]
-        --tab <name>        initial tab: dash|cpu|gpu|mem|proc|io
+        --tab <name>        initial tab: dash|cpu|gpu|npu|mem|proc|io
         --mem-view <name>   initial memory view: cpu|gpu|ttm|unified
         --gpu-only          hide processes without GPU memory in the process list
         --size <WxH>        render size for --frames [default: 120x38]
@@ -79,7 +79,7 @@ SCRIPTING / SCREENSHOTS:
 
 KEYS:
     q / Ctrl-C  quit        ? / h     help
-    Tab / 1-6   tabs        m         cycle memory views (CPU/GPU/TTM/Unified)
+    Tab / 1-7   tabs        m         cycle memory views (CPU/GPU/TTM/Unified)
     +/-         interval    space     pause
     up/down j/k select      PgUp/PgDn page
     f           filter      /         filter by user
