@@ -1,5 +1,6 @@
 //! amdtop entry point: argument handling, terminal setup and the main loop.
 
+mod access;
 mod args;
 mod collect;
 mod json;
@@ -345,6 +346,41 @@ fn buffer_to_ansi(buffer: &ratatui::buffer::Buffer) -> String {
     out
 }
 
+/// Warn about a missing device group and make the user acknowledge it before the
+/// TUI takes over the terminal. Returns false when they choose to quit.
+fn confirm_access() -> io::Result<bool> {
+    let Some(missing) = access::check() else {
+        return Ok(true);
+    };
+    let stdin = io::stdin();
+    let stderr = io::stderr();
+    let mut input = stdin.lock();
+    let mut output = stderr.lock();
+    confirm_with(&missing, &mut input, &mut output)
+}
+
+fn confirm_with(
+    missing: &access::Missing,
+    input: &mut dyn io::BufRead,
+    output: &mut dyn Write,
+) -> io::Result<bool> {
+    writeln!(output, "amdtop: NPU monitoring is unavailable")?;
+    for line in missing.lines() {
+        writeln!(output, "  {}", line)?;
+    }
+    writeln!(
+        output,
+        "  the NPU panels will stay empty; every other view still works."
+    )?;
+    write!(output, "\npress Enter to continue, or q to quit: ")?;
+    output.flush()?;
+
+    let mut answer = String::new();
+    input.read_line(&mut answer)?;
+    let answer = answer.trim().to_ascii_lowercase();
+    Ok(!matches!(answer.as_str(), "q" | "quit" | "n" | "no"))
+}
+
 /// Interactive TUI.
 fn interactive<B: Backend>(
     backend: B,
@@ -352,6 +388,10 @@ fn interactive<B: Backend>(
     theme: Theme,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sampler = Sampler::new(backend, args.history);
+    // The demo backend is simulated: it needs no device access.
+    if !sampler.backend.is_sim() && !confirm_access()? {
+        return Ok(());
+    }
     let mut app = ui::App::new(&args);
     app.sim = sampler.backend.is_sim();
 
@@ -463,4 +503,49 @@ fn unicode_supported() -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn missing_render() -> access::Missing {
+        access::Missing {
+            user: "naal".into(),
+            group: "render".into(),
+            gid: 991,
+            node: PathBuf::from("/dev/accel/accel0"),
+        }
+    }
+
+    #[test]
+    fn acknowledgement_continues_on_enter() {
+        let mut input = b"\n".as_slice();
+        let mut output = Vec::new();
+        assert!(confirm_with(&missing_render(), &mut input, &mut output).unwrap());
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("NPU monitoring is unavailable"));
+        assert!(text.contains("sudo usermod -aG render naal"));
+        assert!(text.contains("press Enter to continue, or q to quit"));
+    }
+
+    #[test]
+    fn acknowledgement_aborts_on_q() {
+        for answer in ["q\n", "Q\n", "quit\n", "n\n"] {
+            let mut input = answer.as_bytes();
+            let mut output = Vec::new();
+            assert!(
+                !confirm_with(&missing_render(), &mut input, &mut output).unwrap(),
+                "{answer:?} should quit"
+            );
+        }
+    }
+
+    #[test]
+    fn end_of_input_is_treated_as_continue() {
+        let mut input = b"".as_slice();
+        let mut output = Vec::new();
+        assert!(confirm_with(&missing_render(), &mut input, &mut output).unwrap());
+    }
 }

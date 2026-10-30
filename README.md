@@ -135,7 +135,7 @@ docker build --target export --output type=local,dest=dist .   # → dist/amdtop
 image. The builder compiles the dependency graph once behind a throwaway
 `main.rs`, so only the `amdtop` crate is recompiled when `src/` changes.
 
-For the test suite (57 unit + UI render tests), build the toolchain image once and
+For the test suite (75 unit + UI render tests), build the toolchain image once and
 mount the checkout; the `amdtop-target` volume keeps the warm dependency cache
 between runs:
 
@@ -165,6 +165,35 @@ sudo ./dist/amdtop         # + full TTM debugfs view
 ```
 
 `--demo` needs no AMD hardware and is the quickest way to check a build.
+
+### Group access
+
+Nothing needs root for the NPU, CPU, GPU, memory, disk or net views. The one
+device node amdtop opens itself is `/dev/accel/accelN`, which ships as
+`root:render`, so the user must be in the **`render`** group:
+
+```sh
+sudo usermod -aG render "$USER"   # then log out and back in
+```
+
+If an accel device exists but the current user is not in its group, amdtop says
+so before taking over the terminal and waits for **Enter** to continue (or `q` to
+quit), instead of silently showing empty NPU panels:
+
+```text
+amdtop: NPU monitoring is unavailable
+  /dev/accel/accel0 is owned by group 'render' (gid 991), but naal is not a member.
+  add the group with:  sudo usermod -aG render naal
+  then log out and back in (group membership is fixed at login).
+  the NPU panels will stay empty; every other view still works.
+
+press Enter to continue, or q to quit:
+```
+
+`sudo` is only needed for the **TTM** view (`/sys/kernel/debug` is `0700 root`)
+and to see other users' per-process GPU memory. NPU power and column utilization
+are a firmware matter: they stay unavailable even as root when the board does not
+expose the AMD PMF NPU metrics device.
 
 ### Keys
 
