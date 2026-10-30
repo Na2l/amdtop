@@ -146,18 +146,27 @@ impl Backend for SimBackend {
             1.0,
         );
         self.power = self.wobble(12.0 + self.gpu_busy * 55.0 + total * 20.0, 2.0, 6.0, 120.0);
+        // Memory: one model load/unload cycle across the demo, so the RAM and
+        // GTT histories move by a visible fraction of the pool. A random walk of
+        // a few hundred MiB only jitters inside a single glyph row at 126 GiB.
+        let load = 0.5 - 0.5 * ((self.tick as f64) / 90.0).cos();
         self.vram_used = crate::util::clamp(
-            self.vram_used as f64 + self.rng.range(-8.0, 8.0) * MIB as f64,
+            self.vram_used as f64 + self.rng.range(-40.0, 40.0) * MIB as f64,
             320.0 * MIB as f64,
             (self.vram_total - 8 * MIB) as f64,
         ) as u64;
         self.gtt_used = crate::util::clamp(
-            self.gtt_used as f64 + self.rng.range(-160.0, 170.0) * MIB as f64,
+            12.0 * GIB as f64
+                + 18.0 * GIB as f64 * load
+                + self.rng.range(-250.0, 250.0) * MIB as f64,
             8.0 * GIB as f64,
             (self.gtt_total * 3 / 4) as f64,
         ) as u64;
         self.mem_used = crate::util::clamp(
-            self.mem_used as f64 + self.rng.range(-220.0, 220.0) * MIB as f64 + (self.gtt_used as f64 - 12.0 * GIB as f64) * 0.02,
+            22.0 * GIB as f64
+                + self.gtt_used as f64
+                + 2.0 * GIB as f64 * load
+                + self.rng.range(-120.0, 120.0) * MIB as f64,
             20.0 * GIB as f64,
             (self.mem_total - 6 * GIB) as f64,
         ) as u64;

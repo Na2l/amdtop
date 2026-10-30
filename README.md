@@ -164,7 +164,10 @@ sudo ./dist/amdtop         # + full TTM debugfs view
 ./dist/amdtop --demo       # simulated Strix Halo, any machine
 ```
 
-`--demo` needs no AMD hardware and is the quickest way to check a build.
+`--demo` needs no AMD hardware and is the quickest way to check a build. Its
+memory follows one model load/unload cycle (~9 minutes at the default 1 s
+interval), so the RAM and GTT histories climb by several GiB instead of
+jittering inside a single glyph row.
 
 ### Group access
 

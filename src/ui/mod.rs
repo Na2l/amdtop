@@ -874,6 +874,37 @@ mod tests {
     }
 
     #[test]
+    fn mem_box_draws_no_history_under_free() {
+        let (snap, history) = snapshot_and_history();
+        let mut app = App::new(&crate::args::Args::default());
+        app.tab = Tab::Dash;
+        app.sim = true;
+        // Tall enough that the old sparkline (whatever is left over after the
+        // six bars) would have been drawn under the Free row.
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 150,
+            height: 62,
+        };
+        let mut buf = Buffer::empty(area);
+        render(area, &mut buf, &app, &snap, &history, &Theme::new(false, true));
+
+        let (x, y) = row_of(&buf, "Free:").expect("Free row");
+        for dy in 1..12u16 {
+            let mut line = String::new();
+            for dx in 0..40u16 {
+                line.push_str(buf.cell((x + dx, y + dy)).map(|c| c.symbol()).unwrap_or(" "));
+            }
+            assert!(
+                !line.chars().any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)),
+                "history glyph under the Free row: {:?}",
+                line
+            );
+        }
+    }
+
+    #[test]
     fn io_tab_shows_net_and_disks() {
         let text = render_tab(Tab::Io, MemView::Unified);
         assert!(text.contains("net ·"), "net box missing from the IO tab");

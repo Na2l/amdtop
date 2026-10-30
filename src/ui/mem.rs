@@ -20,7 +20,7 @@ use super::widgets;
 use super::{App, MemView};
 
 /// btop-style memory box: one labelled bar per metric, GTT among them.
-pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, theme: &Theme) {
+pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, _hist: &History, theme: &Theme) {
     let mem = &snap.mem;
     let gtt = snap.gpu.as_ref().and_then(|g| g.gtt_used).unwrap_or(0);
     let title = format!("mem · {}", util::human_bytes(mem.total));
@@ -38,7 +38,6 @@ pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, t
         ("Cached:", mem.cached, mem.total, Gradient::Cached),
         ("Free:", mem.free, mem.total, Gradient::Free),
     ];
-    let rows_len = rows.len();
     let label_width = 9u16;
     let value_width = 11u16;
     let pct_width = 5u16;
@@ -47,11 +46,7 @@ pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, t
         .saturating_sub(label_width + value_width + pct_width + 2)
         .max(3);
 
-    let mut graph_height = inner.height.saturating_sub(rows_len as u16);
-    if graph_height < 3 {
-        graph_height = 0;
-    }
-    let usable = inner.height.saturating_sub(graph_height) as usize;
+    let usable = inner.height as usize;
     for (row, (label, value, total, kind)) in rows.iter().enumerate().take(usable) {
         let y = inner.y + row as u16;
         buf.set_line(
@@ -92,22 +87,6 @@ pub fn btop_box(area: Rect, buf: &mut Buffer, snap: &Snapshot, hist: &History, t
             Some(color) => widgets::meter_solid(area, buf, ratio, "", &right, theme, color),
             None => widgets::meter(area, buf, ratio, "", &right, theme, *kind),
         }
-    }
-    if graph_height >= 1 && inner.height > 1 {
-        let graph = Rect {
-            x: inner.x,
-            y: inner.bottom() - graph_height as u16,
-            width: inner.width,
-            height: graph_height as u16,
-        };
-        widgets::graph(
-            graph,
-            buf,
-            &hist.mem_used.values(),
-            mem.total as f64,
-            theme,
-            Gradient::Cpu,
-        );
     }
 }
 
